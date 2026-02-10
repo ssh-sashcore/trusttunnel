@@ -1,5 +1,5 @@
 #!/bin/bash
-set -x
+#set -x
 cd /root/
 
 curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh | sh -s -
