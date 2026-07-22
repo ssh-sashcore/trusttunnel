@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 #set -x
 cd /root/
 
@@ -15,7 +16,7 @@ cd /opt/trusttunnel/
 #####
 rm -rf /opt/trusttunnel/credentials.toml && \
 for i in $(seq 1 3); do \
-  pass=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 10); \
+  pass=$(openssl rand -hex 10 | cut -c1-10); \
   printf '[[client]]\nusername = "admin%s"\npassword = "%s"\n\n' "$i" "$pass" >> /opt/trusttunnel/credentials.toml; \
 done
 #####
@@ -76,8 +77,7 @@ EOF
 ######
 
 rm -rf /opt/trusttunnel/hosts.toml && \
-#curl -o /opt/trusttunnel/hosts.toml https://checkvpn.net/files/trusttunnelinstall_ubuntu_24.04_hosts.toml
-#sed -i "s|hostname = \".*\"|hostname = \"$hostname\"|" /opt/trusttunnel/hosts.toml
+
 cat > /opt/trusttunnel/hosts.toml << EOF
 ping_hosts = []
 speedtest_hosts = []
@@ -93,19 +93,44 @@ EOF
 
 ####
 
-apt install certbot -y && \
+apt install certbot -y
 
-certbot certonly --standalone --preferred-challenges http -d "$hostname" --agree-tos -m "admin@$hostname" --non-interactive && \
-install -d certs && \
-cp "/etc/letsencrypt/live/$hostname/fullchain.pem" certs/cert.pem && \
-cp "/etc/letsencrypt/live/$hostname/privkey.pem" certs/key.pem
+certbot certonly \
+  --standalone \
+  --preferred-challenges http \
+  -d "$hostname" \
+  --agree-tos \
+  -m "admin@$hostname" \
+  --non-interactive
 
+install -d -m 0755 /opt/trusttunnel/certs
+install -m 0644 "/etc/letsencrypt/live/$hostname/fullchain.pem" /opt/trusttunnel/certs/cert.pem
+install -m 0600 "/etc/letsencrypt/live/$hostname/privkey.pem" /opt/trusttunnel/certs/key.pem
 
 ####
 
 cp trusttunnel.service.template /etc/systemd/system/trusttunnel.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now trusttunnel
+systemctl daemon-reload
+systemctl enable --now trusttunnel.service
+
+####
+install -d -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+cat > /etc/letsencrypt/renewal-hooks/deploy/trusttunnel.sh << EOF
+#!/bin/sh
+set -eu
+
+[ "\${RENEWED_LINEAGE:-}" = "/etc/letsencrypt/live/$hostname" ] || exit 0
+
+install -d -m 0755 /opt/trusttunnel/certs
+install -m 0644 "\$RENEWED_LINEAGE/fullchain.pem" /opt/trusttunnel/certs/cert.pem
+install -m 0600 "\$RENEWED_LINEAGE/privkey.pem" /opt/trusttunnel/certs/key.pem
+
+systemctl restart trusttunnel.service
+EOF
+chmod 0750 /etc/letsencrypt/renewal-hooks/deploy/trusttunnel.sh
+
+####
+systemctl enable --now certbot.timer
 
 
 
